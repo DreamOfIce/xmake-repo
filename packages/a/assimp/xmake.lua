@@ -40,7 +40,7 @@ package("assimp")
     add_configs("asan",                  {description = "Enable AddressSanitizer.", default = false, type = "boolean"})
     add_configs("ubsan",                 {description = "Enable Undefined Behavior sanitizer.", default = false, type = "boolean"})
 
-    add_deps("cmake", "zlib")
+    add_deps("cmake", "minizip", "zlib")
 
     if is_plat("windows") then
         add_syslinks("advapi32")
@@ -51,18 +51,18 @@ package("assimp")
             package:add("deps", "irrxml")
         end
         if package:is_plat("linux", "macosx") and package:config("shared") then
-            package:add("links", "assimp")
+            package:add("links", "assimp" .. (package:is_debug() and "d" or ""))
         end
     end)
 
-    on_install("windows", "linux", "macosx", "mingw", function (package)
+    on_install(function (package)
         local configs = {"-DASSIMP_BUILD_SAMPLES=OFF",
                          "-DASSIMP_BUILD_TESTS=OFF",
                          "-DASSIMP_BUILD_DOCS=OFF",
                          "-DASSIMP_BUILD_FRAMEWORK=OFF",
                          "-DASSIMP_INSTALL_PDB=ON",
                          "-DASSIMP_INJECT_DEBUG_POSTFIX=ON",
-                         "-DASSIMP_BUILD_ZLIB=ON",
+                         "-DASSIMP_BUILD_ZLIB=OFF",
                          "-DSYSTEM_IRRXML=ON",
                          "-DASSIMP_WARNINGS_AS_ERRORS=OFF"}
         table.insert(configs, "-DCMAKE_BUILD_TYPE=" .. (package:debug() and "Debug" or "Release"))
@@ -98,7 +98,22 @@ package("assimp")
             io.replace("CMakeLists.txt", "CMAKE_COMPILER_IS_MINGW", "MINGW", {plain = true})
         end
 
-        import("package.tools.cmake").install(package, configs)
+        -- Assimp CMakeLists doesn't find minizip on Windows
+        local ldflags
+        if package:is_plat("windows") then
+            local minizip = package:dep("minizip")
+            if minizip and not minizip:is_system() then
+                local fetchinfo = minizip:fetch({external = false})
+                if fetchinfo then
+                    ldflags = {}
+                    for _, linkdir in ipairs(fetchinfo.linkdirs) do
+                        table.insert(ldflags, "/LIBPATH:" .. linkdir:gsub("\\", "/"))
+                    end
+                end
+            end
+        end
+
+        import("package.tools.cmake").install(package, configs, {ldflags = ldflags, shflags = ldflags})
 
         -- copy pdb
         if package:is_plat("windows") then
